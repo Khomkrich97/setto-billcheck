@@ -703,9 +703,16 @@ def build_rows(data, bills, d_judge, today, frozen=None, ghosts=()):
         # 16/10 any pair within 10 days either side counted, so one non-Meta outflow early in the month
         # turned the whole bank account yellow for weeks. A pair whose bills were not downloaded (frozen)
         # keeps the old day span.
-        brs = paired.get(p["id"], ("", []))[1]
+        kind, brs = paired.get(p["id"], ("", []))
         if not brs:
             return abs((p["day"] - u["day"]).days) <= span
+        # a one-bill pair whose SMS is that bill (or bill + fee) to the satang is only in doubt when u has the
+        # same amount too; that u is instead a sum holding this bill is not worth a yellow (Master 16/10,
+        # Lazada CPAS 4,345 = SMS 4,345 the same day went yellow over a 99,701.77 outflow)
+        if kind in ("exact", "fee") and len(brs) == 1:
+            b = brs[0]
+            return (-INV_LATE <= (u["day"] - b["day"]).days <= GAP_1TO1
+                    and u["amt"] in (b["amt"], b["amt"] + FEE))
         return any(-INV_LATE <= (u["day"] - b["day"]).days <= BULK_DAYS and u["amt"] >= b["amt"] for b in brs)
 
     while queue:
