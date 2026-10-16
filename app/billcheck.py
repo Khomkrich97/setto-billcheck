@@ -7,9 +7,10 @@ accounting reads them in the topup page tab "เช็คเงินตัด".
   1. billcheck_begin  -> one run at a time + the shared matcher memory (frozen pairs, unresolved SMS)
   2. billcheck_data   -> ad accounts (with the last day the system saw a charge), card -> bank account,
                          bank SMS outflows (read only)
-  3. Playwright (the runner's own Facebook login) downloads the billing-activity PDF of every account
-     the system saw charging; then, for bank accounts that still have an SMS without a bill, the other
-     ad accounts on those cards ("search")
+  3. SMS first: only bank accounts with money out in the checked days (or an SMS still unresolved) are
+     checked. Playwright (the runner's own Facebook login) downloads the billing-activity PDF of every
+     account the system saw charging on a card of those banks; then, for bank accounts that still have an
+     SMS without a bill, the other ad accounts on those cards ("search")
   4. pairs bill rows with SMS here on the PC (matcher unchanged, 9 astra rounds), then
      billcheck_finish writes one verdict per SMS + the matcher memory
 
@@ -855,31 +856,48 @@ def _run(token, rep, today, state, days, only, run_id, pilot):
               for k, v in state.get("open", {}).items()
               if k not in loaded and dt.date.fromisoformat(v["day"]) >= today - dt.timedelta(days=KEEP_OPEN)]
 
-    # pass 1: accounts the system saw charging since the bill window opened
-    first = accounts if only else [a for a in accounts if (a.get("last_charge") or "") >= bill_from.isoformat()]
+    # SMS first: the bank accounts with money out in the judged window (or an SMS still unresolved from
+    # an earlier run) are the only ones checked; other banks' SMS are dropped so their context rows are
+    # not mistaken for unpaid ones. Platform-tagged SMS stay (they need no bill, only their verdict).
+    cards, bank_of = card_map(data["cards"])
+    banks = ({s["acct"] for s in data["sms"] if not s.get("plat") and dt.datetime.fromisoformat(s["at"]).date() >= d_judge}
+             | {v["acct"] for v in state.get("open", {}).values()})
+    data = {**data, "sms": [s for s in data["sms"] if s["acct"] in banks or s.get("plat")]}
+    rep.log("บัญชีธนาคารที่มีเงินออกช่วงนี้: " + (", ".join(sorted(set_label(b, bank_of.get(b)) for b in banks)) or "ไม่มี"))
+
+    def on_banks(a, want):
+        return any(cards.get(c, (None,))[0] in want for c in a.get("cards4") or [])
+
+    # pass 1: accounts the system saw charging since the bill window opened, on a card of those banks
+    first = accounts if only else [a for a in accounts if (a.get("last_charge") or "") >= bill_from.isoformat()
+                                   and on_banks(a, banks)]
     prune_runs()
     out_dir = os.path.join(RUNS_DIR, dt.datetime.now(TZ).strftime("%Y-%m-%d %H%M%S"))
     pdf_dir = os.path.join(out_dir, "บิล Meta")
     os.makedirs(pdf_dir, exist_ok=True)
 
-    rep.step("facebook", "เปิด Facebook")
-    with MetaBrowser(rep, out_dir) as mb:
-        mb.ensure_login()
-        rep.step("bills", f"โหลดบิลบัญชีที่ระบบเห็นว่าตัดเงิน {len(first)} บัญชี")
-        rep.log(f"ช่วงบิล {ddmmyyyy(bill_from)} ถึง {ddmmyyyy(today)}")
-        got = mb.fetch(first, bill_from, today, pdf_dir, 0, len(first))
+    got, second = {}, []
+    if not banks and not only:
+        rep.step("facebook", "ไม่มี SMS เงินออกในช่วงนี้ ไม่ต้องโหลดบิล")
+    else:
+        rep.step("facebook", "เปิด Facebook")
+        with MetaBrowser(rep, out_dir) as mb:
+            mb.ensure_login()
+            rep.step("bills", f"โหลดบิลบัญชีที่น่าจะตัดเงิน {len(first)} บัญชี")
+            rep.log(f"ช่วงบิล {ddmmyyyy(bill_from)} ถึง {ddmmyyyy(today)}")
+            got = mb.fetch(first, bill_from, today, pdf_dir, 0, len(first))
 
-        # pass 2 ("search"): a bank account that still has an SMS without a bill gets the bills of every
-        # other ad account whose card pays from it, or whose card the system does not know yet
-        bills, _, _ = collect(got, name_of)
-        _, _, rows_all = build_rows(data, [dict(b) for b in bills], d_judge, today, frozen, ghosts)
-        need = {r["acct"] for r in rows_all if r["status"] in ("bad", "wait", "dup")} | {g["acct"] for g in ghosts}
-        cards, _ = card_map(data["cards"])
-        second = [a for a in accounts if a["id"] not in got and need and
-                  (not a.get("cards4") or any(cards.get(c, (None,))[0] in need for c in a["cards4"]))]
-        if second:
-            rep.step("search", f"ยังมี SMS ที่ไม่เจอบิล หาต่อในอีก {len(second)} บัญชี")
-            got.update(mb.fetch(second, bill_from, today, pdf_dir, len(first), len(first) + len(second)))
+            # pass 2 ("search"): a bank account that still has an SMS without a bill gets the bills of every
+            # other ad account whose card pays from it, or whose card the system does not know yet
+            bills, _, _ = collect(got, name_of)
+            _, _, rows_all = build_rows(data, [dict(b) for b in bills], d_judge, today, frozen, ghosts)
+            need = ({r["acct"] for r in rows_all if r["status"] in ("bad", "wait", "dup")}
+                    | {g["acct"] for g in ghosts}) & banks
+            second = [a for a in accounts if a["id"] not in got and need and
+                      (not a.get("cards4") or on_banks(a, need))]
+            if second:
+                rep.step("search", f"ยังมี SMS ที่ไม่เจอบิล หาต่อในบัญชีโฆษณาอื่นของธนาคารเดียวกันอีก {len(second)} บัญชี")
+                got.update(mb.fetch(second, bill_from, today, pdf_dir, len(first), len(first) + len(second)))
 
     rep.step("match", "จับคู่บิลกับ SMS แล้วส่งผลขึ้นระบบ")
     bills, fails, nones = collect(got, name_of)
