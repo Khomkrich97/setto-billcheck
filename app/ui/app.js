@@ -89,7 +89,7 @@
       + '<div class="hero-txt"><h1>' + esc(h) + '</h1><p>' + esc(p) + '</p>' + extra + '</div>'
       + '<div class="hero-side">'
       +   '<button class="btn primary lg" type="button" data-act="start"' + (S.busy_elsewhere ? ' disabled' : '') + '>' + ICON.play + (d ? 'ตรวจอีกรอบ' : 'เริ่มตรวจ') + '</button>'
-      +   '<select id="sel-days" aria-label="ช่วงที่ตรวจ"><option value="">SMS เมื่อวาน และที่ยังค้าง</option><option value="3">ย้อน 3 วัน</option><option value="7">ย้อน 7 วัน</option><option value="14">ย้อน 14 วัน</option><option value="31">ย้อน 31 วัน</option></select>'
+      +   '<select id="sel-days" aria-label="ช่วงที่ตรวจ"><option value="">SMS เมื่อวาน และที่ยังค้าง</option><option value="1">เมื่อวานอย่างเดียว</option><option value="3">ย้อน 3 วัน</option><option value="7">ย้อน 7 วัน</option><option value="14">ย้อน 14 วัน</option><option value="31">ย้อน 31 วัน</option></select>'
       +   '<button class="btn ghost" type="button" data-act="nisit">เปิดผลในหน้าเติมงบแอด</button>'
       + '</div>';
   }

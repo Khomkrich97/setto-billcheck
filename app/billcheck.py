@@ -861,7 +861,10 @@ def run_check(token, rep=None, days=None, only=None, host=None, write=True):
 
 
 def _run(token, rep, today, state, days, only, run_id, pilot):
-    d_judge = judged_start(state, today, days)
+    # days=1 = "yesterday only": the window is not widened to SMS still unresolved from earlier runs and
+    # their banks are not checked (those SMS stay tracked for the next normal run)
+    strict = days == 1
+    d_judge = judged_start({} if strict else state, today, days)
     bill_from = d_judge - dt.timedelta(days=BILL_BACK)
     sms_from = d_judge - dt.timedelta(days=SMS_BACK)
 
@@ -873,7 +876,7 @@ def _run(token, rep, today, state, days, only, run_id, pilot):
         accounts = [a for a in accounts if a["id"] in want]
     name_of = {a["id"]: a["name"] for a in accounts}
     rep.log(f"บัญชีโฆษณา {len(accounts)} บัญชี SMS เงินออก {len(data['sms'])} รายการ "
-            f"ตรวจ SMS ตั้งแต่ {ddmmyyyy(d_judge)}")
+            f"ตรวจ SMS ตั้งแต่ {ddmmyyyy(d_judge)}" + (" (เมื่อวานอย่างเดียว ไม่ตามตัวที่ค้าง)" if strict else ""))
 
     frozen = {k: v for k, v in state.get("pairs", {}).items()
               if dt.date.fromisoformat(v["day"]) >= today - dt.timedelta(days=MAX_BACK + BILL_BACK)}
@@ -887,8 +890,11 @@ def _run(token, rep, today, state, days, only, run_id, pilot):
     # not mistaken for unpaid ones. Platform-tagged SMS stay (they need no bill, only their verdict).
     cards, bank_of = card_map(data["cards"])
     banks = ({s["acct"] for s in data["sms"] if not s.get("plat") and dt.datetime.fromisoformat(s["at"]).date() >= d_judge}
-             | {v["acct"] for v in state.get("open", {}).values()})
+             | (set() if strict else {v["acct"] for v in state.get("open", {}).values()}))
     data = {**data, "sms": [s for s in data["sms"] if s["acct"] in banks or s.get("plat")]}
+    kept = {s["id"] for s in data["sms"]}
+    ghosts += [{"id": k, "acct": v["acct"], "amt": v["amt"], "day": dt.date.fromisoformat(v["day"])}
+               for k, v in state.get("open", {}).items() if k in loaded and k not in kept]
     rep.log("บัญชีธนาคารที่มีเงินออกช่วงนี้: " + (", ".join(sorted(set_label(b, bank_of.get(b)) for b in banks)) or "ไม่มี"))
 
     def on_banks(a, want):
