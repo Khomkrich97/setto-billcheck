@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>เช็คเงินตัดแอด</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="bar">
+  <div class="bar-in">
+    <div class="brand">
+      <div class="mark">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/></svg>
+      </div>
+      <div>
+        <div class="eyebrow">NISIT <span>/</span> AD OPERATIONS</div>
+        <div class="title">เช็คเงินตัดแอด</div>
+      </div>
+    </div>
+    <div class="who" id="who" hidden>
+      <div class="who-txt"><b id="who-email"></b><span id="who-exp"></span></div>
+      <button class="btn ghost-dark sm" id="btn-logout" type="button">ออกจากระบบ</button>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="view-boot" class="card center"><span class="spin"></span><span>กำลังเปิดโปรแกรม</span></div>
+
+  <!-- login -->
+  <section id="view-login" class="login" hidden>
+    <form class="card login-card" id="login-form" autocomplete="on">
+      <div class="login-icon">
+        <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>
+      </div>
+      <h1>ล็อกอินระบบ NISIT</h1>
+      <p class="muted">ใช้อีเมลกับรหัสเดียวกับที่เข้าเว็บ ต้องเปิดหน้าเติมงบแอดได้</p>
+      <label class="fld"><span>อีเมล</span><input id="in-email" type="email" required autocomplete="username"></label>
+      <label class="fld"><span>รหัสผ่าน</span><input id="in-pw" type="password" required autocomplete="current-password"></label>
+      <div class="err" id="login-err" hidden></div>
+      <button class="btn primary block" id="btn-login" type="submit">ล็อกอิน</button>
+      <p class="tiny">รหัสผิด 3 ครั้ง ระบบล็อก 1 ชั่วโมง โปรแกรมจำการล็อกอินไว้ 30 วัน</p>
+    </form>
+  </section>
+
+  <!-- home -->
+  <section id="view-home" hidden>
+    <div class="card hero" id="hero"></div>
+    <div class="grid2">
+      <div class="card">
+        <div class="card-h">ตั้งค่า</div>
+        <label class="switch-row">
+          <span class="switch"><input type="checkbox" id="sw-auto"><i></i></span>
+          <span>
+            <b>เปิดเครื่องแล้วเปิดโปรแกรมนี้เอง</b>
+            <span class="muted">ตรวจให้เองวันละครั้ง ถ้าวันนั้นยังไม่มีใครตรวจ</span>
+          </span>
+        </label>
+      </div>
+      <div class="card">
+        <div class="card-h">รอบล่าสุดในระบบ</div>
+        <div id="runs" class="runs"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- running -->
+  <section id="view-run" hidden>
+    <div class="card">
+      <div class="run-head">
+        <div>
+          <div class="card-h">กำลังตรวจ</div>
+          <div class="muted" id="run-started"></div>
+        </div>
+        <button class="btn ghost sm" id="btn-stop" type="button">หยุด</button>
+      </div>
+      <ol class="steps" id="steps"></ol>
+      <div class="fb-alert" id="fb-alert" hidden>
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></svg>
+        <div><b>ล็อกอิน Facebook ในหน้าต่างที่เด้งขึ้นมา</b><span>ใช้บัญชี Facebook ของตัวเอง ยืนยันตัวตนให้ครบ ครั้งต่อไปโปรแกรมจำไว้ให้</span></div>
+      </div>
+      <div class="prog" id="prog-wrap">
+        <div class="prog-txt"><span id="prog-label">เตรียมตัว</span><b id="prog-num"></b></div>
+        <div class="prog-bar"><i id="prog-bar"></i></div>
+      </div>
+      <div class="accts" id="accts"></div>
+      <details class="logbox">
+        <summary>รายละเอียดการทำงาน</summary>
+        <div id="log" class="log"></div>
+      </details>
+      <p class="tiny">ระหว่างนี้ใช้เครื่องทำงานอื่นได้ อย่าปิดหน้าต่าง Facebook ที่ย่อไว้</p>
+    </div>
+  </section>
+
+  <!-- error -->
+  <section id="view-error" hidden>
+    <div class="card errcard">
+      <div class="err-icon"><svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg></div>
+      <div class="err-body">
+        <h2>ตรวจไม่สำเร็จ</h2>
+        <p id="err-msg"></p>
+        <div class="btns">
+          <button class="btn primary" id="btn-retry" type="button">ตรวจอีกครั้ง</button>
+          <button class="btn ghost" id="btn-home2" type="button">กลับหน้าแรก</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- result -->
+  <section id="view-done" hidden>
+    <div class="card done-head">
+      <div class="done-ic"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+      <div class="done-txt">
+        <h2 id="done-title">ตรวจเสร็จ ส่งผลขึ้นระบบแล้ว</h2>
+        <p class="muted" id="done-sub"></p>
+      </div>
+      <div class="btns">
+        <button class="btn primary" id="btn-open-nisit" type="button">เปิดผลในหน้าเติมงบแอด</button>
+        <button class="btn ghost" id="btn-home" type="button">กลับหน้าแรก</button>
+      </div>
+    </div>
+    <div class="warnbox" id="done-warn" hidden></div>
+    <div class="tiles" id="tiles"></div>
+    <div class="card pad0">
+      <div class="tbl-head">
+        <div class="card-h">SMS เงินออก</div>
+        <div class="chips" id="chips"></div>
+      </div>
+      <div class="tw"><table class="tbl"><thead><tr><th>สถานะ</th><th>วันเวลา SMS</th><th>บัญชีธนาคาร</th><th class="num">ยอด (บาท)</th><th>บัญชีโฆษณาในบิล</th><th>หมายเหตุ</th></tr></thead><tbody id="rows"></tbody></table></div>
+    </div>
+    <details class="card more" id="lonely-box">
+      <summary><span class="card-h">บิล Meta ที่ยังไม่เห็น SMS</span><span class="muted" id="lonely-n"></span></summary>
+      <div class="tw"><table class="tbl"><thead><tr><th>วันที่ในบิล</th><th>บัญชีโฆษณา</th><th>บัตร</th><th class="num">ยอด (บาท)</th><th>เหตุผล</th></tr></thead><tbody id="lonely"></tbody></table></div>
+    </details>
+    <div class="foot-links"><button class="link" id="btn-folder" type="button">เปิดโฟลเดอร์ PDF บิลของรอบนี้</button></div>
+  </section>
+</main>
+<footer class="foot" id="foot"></footer>
+<script src="/app.js"></script>
+</body>
+</html>
