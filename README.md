@@ -21,6 +21,10 @@
 เปลี่ยน library ให้แก้บรรทัด `DEPS` ใน `START.bat` เครื่องของทีมจะติดตั้งให้เองก่อนเปลี่ยนเวอร์ชัน
 โฟลเดอร์ที่เป็น git clone ไม่อัปเดตตัวเอง (`START.bat` ตั้ง `BILLCHECK_NO_UPDATE`) ใช้ทดสอบก่อน push
 
+## เพดานตัด
+
+หลังส่งผลแต่ละรอบ โปรแกรมส่งยอดตัดบัตรที่สูงสุดและเป็นเลขบาทเต็มของแต่ละบัญชีโฆษณาไป NISIT RPC `billcheck_caps` ถ้าสูงกว่าเพดานใน `topup_ad_billing` จะขึ้นเพดานให้ ไม่ลดเพดานเอง ประวัติอยู่ใน `billcheck_cap_log` (migration `NISIT/supabase/migrations/20261016a_billcheck_caps.sql`)
+
 ## ข้อมูลอยู่ที่ไหน
 
 `%LOCALAPPDATA%\NISIT\billcheck` เก็บตัวโปรแกรมที่ติดตั้ง การล็อกอินที่เข้ารหัสด้วย Windows โปรไฟล์ Facebook ของโปรแกรม PDF บิล 30 วัน และ `app.log`
