@@ -172,26 +172,73 @@
     $('done-warn').hidden = !warns.length;
     $('done-warn').innerHTML = warns.join('<br>');
 
-    $('tiles').innerHTML = ORDER.map(function(k){
-      return '<button type="button" class="tile ' + k + (filter === k ? ' on' : '') + '" data-filter="' + k + '"><div class="l">' + STATUS[k] + '</div><div class="v">' + (n[k] || 0) + '</div><div class="s">' + baht(sums[k]) + ' บาท</div></button>';
-    }).join('');
+    var all = res.rows || [];
+    $('sumbox').innerHTML = sumHtml(all);
     $('chips').innerHTML = [['all','ทั้งหมด']].concat(ORDER.map(function(k){ return [k, STATUS[k]]; })).map(function(c){
-      return '<button type="button" class="chip' + (filter === c[0] ? ' on' : '') + '" data-filter="' + c[0] + '">' + c[1] + '</button>';
+      var cnt = c[0] === 'all' ? all.length : (n[c[0]] || 0);
+      return '<button type="button" class="chip' + (filter === c[0] ? ' on' : '') + '" data-filter="' + c[0] + '">' + c[1] + ' ' + cnt + '</button>';
     }).join('');
-    var rows = (res.rows || []).filter(function(r){ return filter === 'all' || r.status === filter; });
-    $('rows').innerHTML = rows.length ? rows.map(function(r){
-      var ads = (r.bills || []).map(function(b){
-        return '<div>' + esc(b.ad) + '<span class="sub mono">' + esc(b.day) + ' บัตร ' + esc(b.card) + (r.bills.length > 1 ? ' ' + baht(b.amount) : '') + '</span></div>';
-      }).join('') || '<span class="muted">ไม่มี</span>';
-      return '<tr class="' + (r.status === 'bad' ? 'bad' : '') + '"><td class="nowrap"><span class="pill ' + r.status + '"><i></i>' + STATUS[r.status] + '</span></td>'
-        + '<td class="mono nowrap">' + esc(r.at) + '</td><td>' + esc(r.acct) + '</td><td class="num">' + baht(r.amount) + '</td>'
-        + '<td>' + ads + '</td><td class="muted">' + esc(r.note) + '</td></tr>';
-    }).join('') : '<tr><td colspan="6" class="empty">ไม่มีรายการ</td></tr>';
+    var rows = all.filter(function(r){ return filter === 'all' || r.status === filter; }).slice()
+      .sort(function(a, b){ return atKey(a.at) < atKey(b.at) ? -1 : atKey(a.at) > atKey(b.at) ? 1 : 0; });
+    var html = '', day = null;
+    rows.forEach(function(r){
+      var d = String(r.at || '').slice(0, 10);
+      if(d !== day){
+        day = d;
+        var g = rows.filter(function(x){ return String(x.at || '').slice(0, 10) === d; });
+        var meta = g.filter(function(x){ return x.status !== 'plat'; });
+        var found = meta.filter(function(x){ return x.status === 'ok' || x.status === 'dup'; }).length;
+        var full = found === meta.length;
+        html += '<tr class="day"><td colspan="6"><b class="mono">' + esc(d) + '</b><span>เงินออก ' + g.length + ' รายการ ' + baht(g.reduce(function(t, x){ return t + Number(x.amount || 0); }, 0)) + ' บาท</span>'
+          + '<span class="' + (full ? 'g' : 'w') + '">เจอบิล Meta ' + found + '/' + meta.length + (full ? ' ครบ' : ' ยังไม่ครบ') + '</span></td></tr>';
+      }
+      var bills = r.bills || [];
+      var ads = bills.map(function(b){
+        return '<div>' + esc(b.ad) + '<span class="sub mono">บิล ' + esc(b.day) + ' บัตร ' + esc(b.card) + (bills.length > 1 ? ' ' + baht(b.amount) : '') + '</span></div>';
+      }).join('') || '<span class="muted">-</span>';
+      var billSum = bills.reduce(function(t, b){ return t + Number(b.amount || 0); }, 0);
+      html += '<tr class="' + (r.status === 'bad' ? 'bad' : '') + '"><td class="mono nowrap">' + esc(String(r.at || '').slice(11)) + '</td><td>' + esc(r.acct) + '</td>'
+        + '<td class="num">' + baht(r.amount) + '</td><td>' + ads + '</td><td class="num">' + (bills.length ? baht(billSum) : '<span class="muted">-</span>') + '</td>'
+        + '<td>' + verdict(r, billSum) + '</td></tr>';
+    });
+    $('rows').innerHTML = html || '<tr><td colspan="6" class="empty">ไม่มีรายการ</td></tr>';
     var lon = res.lonely || [];
     $('lonely-n').textContent = lon.length + ' รายการ ไว้ดูประกอบ ไม่ได้แปลว่าผิด';
     $('lonely').innerHTML = lon.length ? lon.map(function(b){
       return '<tr><td class="mono nowrap">' + esc(b.day) + '</td><td>' + esc(b.ad) + '</td><td class="mono">' + esc(b.card) + '</td><td class="num">' + baht(b.amount) + '</td><td class="muted">' + esc(b.why) + '</td></tr>';
     }).join('') : '<tr><td colspan="5" class="empty">ไม่มี</td></tr>';
+  }
+
+  // "16/10/2026 09:15" -> "2026-10-16 09:15" for sorting
+  function atKey(at){ var m = /^(\d{2})\/(\d{2})\/(\d{4}) ?(.*)$/.exec(String(at || '')); return m ? m[3] + '-' + m[2] + '-' + m[1] + ' ' + m[4] : String(at || ''); }
+  function verdict(r, billSum){
+    var bills = r.bills || [], diff = Math.round((Number(r.amount || 0) - billSum) * 100) / 100, parts = [];
+    var note = r.note ? '<span class="sub muted">' + esc(r.note) + '</span>' : '';
+    if(r.status === 'plat') return '<span class="pill plat"><i></i>' + STATUS.plat + '</span>' + note;
+    if(r.status === 'bad') return '<span class="pill bad"><i></i>ไม่เจอบิล Meta</span>' + note;
+    if(r.status === 'wait') return '<span class="pill wait"><i></i>รอบิล</span>' + note;
+    if(bills.length > 1) parts.push('รวม ' + bills.length + ' บิล');
+    parts.push(diff === 0 ? 'ตรงเป๊ะ' : diff === 20 ? 'บิล + ค่าธรรมเนียม 20 บาท' : 'ต่าง ' + baht(diff));
+    if(r.status === 'dup') return '<span class="pill dup"><i></i>' + esc(parts.join(' ')) + ' ต้องเทียบ</span>' + note;
+    return '<span class="pill ok"><i></i>' + esc(parts.join(' ')) + '</span>';
+  }
+  function sumHtml(all){
+    var total = all.reduce(function(t, r){ return t + Number(r.amount || 0); }, 0);
+    var meta = all.filter(function(r){ return r.status !== 'plat'; });
+    var c = { ok:0, dup:0, wait:0, bad:0 };
+    meta.forEach(function(r){ c[r.status] = (c[r.status] || 0) + 1; });
+    var found = c.ok + c.dup, miss = meta.length - found, full = !miss, plat = all.length - meta.length;
+    var pct = meta.length ? Math.round(found / meta.length * 100) : 100;
+    var parts = ['ตรงบิล ' + c.ok];
+    if(c.dup) parts.push('เจอบิลแต่ต้องเทียบ ' + c.dup);
+    if(c.wait) parts.push('รอบิล ' + c.wait);
+    if(c.bad) parts.push('ไม่เจอบิล ' + c.bad);
+    if(plat) parts.push('แพลตฟอร์มอื่น ' + plat + ' (ไม่นับ)');
+    return '<div><div class="sum-k">SMS เงินออก</div><div class="sum-v">' + all.length + ' <small>รายการ</small></div><div class="sum-s mono">' + baht(total) + ' บาท</div></div>'
+      + '<div><div class="sum-k">จับคู่บิล Meta</div>'
+      + '<div class="sum-v ' + (full ? 'g' : 'w') + '">' + found + '/' + meta.length + ' <small>' + (full ? 'ครบทุกรายการ' : 'ยังไม่ครบ ขาด ' + miss) + '</small></div>'
+      + '<div class="bar"><i style="width:' + pct + '%"></i></div>'
+      + '<div class="sum-s">' + parts.join(' · ') + '</div></div>';
   }
 
   // ── actions ──
