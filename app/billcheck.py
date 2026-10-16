@@ -735,6 +735,32 @@ def collect(got, name_of):
     return bills, fails, nones
 
 
+def raise_caps(token, run_id, bills, name_of, rep):
+    """Meta raises an account's billing threshold by itself; a threshold charge is a whole-baht amount.
+    Send each account's largest whole-baht card charge; NISIT (billcheck_caps) only ever raises the
+    stored threshold. Odd amounts (billing-date charges such as 30,358.95) are left out. Never fails the run."""
+    top = {}
+    for b in bills:
+        if b["card"].isdigit() and PAID_RE.match(b["status"]) and b["amount"] == int(b["amount"]):
+            if b["ad_id"] not in top or b["amount"] > top[b["ad_id"]]["amount"]:
+                top[b["ad_id"]] = b
+    if not top:
+        return
+    caps = [{"ad_id": b["ad_id"], "amount": str(int(b["amount"])), "day": b["day"].isoformat(), "txid": b["txid"][:80]}
+            for b in top.values()]
+    try:
+        res = rpc("billcheck_caps", {"p_token": token, "p_run": run_id, "p_caps": caps}, timeout=20)
+    except Exception as e:
+        rep.log(f"ปรับเพดานตัดไม่สำเร็จ ({e}) รอบหน้าจะลองใหม่")
+        return
+    if not res.get("ok"):
+        rep.log(f"ปรับเพดานตัดไม่สำเร็จ ({res.get('error')}) รอบหน้าจะลองใหม่")
+        return
+    for r in res.get("raised") or []:
+        old = f"{float(r['old']):,.0f}" if r.get("old") is not None else "ไม่มี"
+        rep.log(f"ปรับเพดานตัด {name_of.get(r['ad_id'], r['ad_id'])} จาก {old} เป็น {float(r['new']):,.0f} ตามบิลที่ตัดจริง")
+
+
 def bill_out(b):
     return {"ad": b["ad_name"], "ad_id": b["ad_id"], "card": b["card"], "day": ddmmyyyy(b["day"]),
             "txid": b["txid"], "amount": b["amount"]}
@@ -943,6 +969,7 @@ def _run(token, rep, today, state, days, only, run_id, pilot):
                             "last_run": today.isoformat()}
         finish(token, run_id, payload, rep)
         rep.log("ส่งผลขึ้นระบบ NISIT แล้ว")
+        raise_caps(token, run_id, bills, name_of, rep)
     else:
         rpc("billcheck_abort", {"p_token": token, "p_run": run_id, "p_error": "ลองบางบัญชี ไม่บันทึกผล"}, timeout=15)
         rep.log("ลองบางบัญชี ไม่ได้ส่งผลขึ้นระบบ")
