@@ -201,6 +201,29 @@ def ensure_shortcuts():
         log_file(f"shortcut failed: {e}")
 
 
+def pick_folder(current):
+    """Windows folder picker (on top of the app window) -> chosen absolute path, or None."""
+    q = lambda s: "'" + s.replace("'", "''") + "'"
+    start = current if os.path.isdir(current) else bc.downloads_dir()
+    ps = "\n".join([
+        "Add-Type -AssemblyName System.Windows.Forms",
+        "[Console]::OutputEncoding = [Text.Encoding]::UTF8",
+        "$d = New-Object System.Windows.Forms.FolderBrowserDialog",
+        f"$d.Description = {q('เลือกโฟลเดอร์ที่จะเก็บ PDF บิล Meta (โปรแกรมสร้างโฟลเดอร์ย่อยตามรอบตรวจให้เอง)')}",
+        f"$d.SelectedPath = {q(start)}",
+        "$o = New-Object System.Windows.Forms.Form -Property @{TopMost = $true}",
+        "if ($d.ShowDialog($o) -eq [System.Windows.Forms.DialogResult]::OK) { $d.SelectedPath }"])
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Sta", "-EncodedCommand",
+                            base64.b64encode(ps.encode("utf-16-le")).decode("ascii")],
+                           capture_output=True, timeout=600, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        p = r.stdout.decode("utf-8", "replace").strip().lstrip("\ufeff")
+        return p if p and os.path.isabs(p) and os.path.isdir(p) else None
+    except Exception as e:
+        log_file(f"folder picker failed: {e}")
+        return None
+
+
 # ── run state shared with the web UI ───────────────────────────────────────────────────────────
 class State:
     def __init__(self):
@@ -231,6 +254,7 @@ class State:
             return copy.deepcopy({
                 "version": VERSION, "auth": token_info(tok) if tok else None,
                 "autostart": bool(autostart_get()), "run": self.run, "last": (self.last or {}).get("last"),
+                "pdf_dir": bc.pdf_root(), "pdf_custom": bool(load_json(CONFIG, {}).get("pdf_dir")),
                 "runs": runs[:5], "done_today": done_today,
                 "busy_elsewhere": busy if self.run["phase"] != "running" else None,
                 "last_err": self.last_err, "net_wait": self.net_wait})
@@ -488,11 +512,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             what = body.get("what")
             if what == "nisit":
                 webbrowser.open(NISIT_PAGE)
+            elif what == "pdfroot":
+                folder = bc.pdf_root()
+                os.makedirs(folder, exist_ok=True)
+                os.startfile(folder)
             elif what == "folder":
-                folder = ((S.run.get("result") or {}).get("folder")) or bc.RUNS_DIR
+                folder = ((S.run.get("result") or {}).get("folder")) or bc.pdf_root()
                 os.makedirs(folder, exist_ok=True)
                 os.startfile(folder)
             return {"ok": True}
+        if path == "/api/pdfdir":
+            if body.get("action") == "reset":
+                cfg = load_json(CONFIG, {})
+                cfg.pop("pdf_dir", None)
+                save_json(CONFIG, cfg)
+            elif body.get("action") == "pick":
+                picked = pick_folder(bc.pdf_root())
+                if picked:
+                    save_json(CONFIG, {**load_json(CONFIG, {}), "pdf_dir": picked})
+            return {"ok": True, "pdf_dir": bc.pdf_root(), "pdf_custom": bool(load_json(CONFIG, {}).get("pdf_dir"))}
         if path == "/api/refresh":
             threading.Thread(target=refresh_last, daemon=True).start()
             return {"ok": True}

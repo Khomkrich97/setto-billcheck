@@ -56,6 +56,16 @@
             <span class="muted">ตรวจให้เองวันละครั้ง ถ้าวันนั้นยังไม่มีใครตรวจ</span>
           </span>
         </label>
+        <div class="pdf-row">
+          <b>เก็บ PDF บิลที่</b>
+          <span class="muted pdf-path" id="pdf-path"></span>
+          <span class="muted">แต่ละรอบตรวจได้โฟลเดอร์ย่อยตามวันเวลา</span>
+          <div class="pdf-btns">
+            <button class="btn ghost sm" id="btn-pdf-pick" type="button">เปลี่ยนโฟลเดอร์</button>
+            <button class="btn ghost sm" id="btn-pdf-open" type="button">เปิดโฟลเดอร์</button>
+            <button class="link" id="btn-pdf-reset" type="button" hidden>กลับไปใช้โฟลเดอร์ดาวน์โหลด</button>
+          </div>
+        </div>
       </div>
       <div class="card">
         <div class="card-h">รอบล่าสุดในระบบ</div>

@@ -41,6 +41,8 @@ HOME_URL = "https://business.facebook.com/latest/billing_hub/accounts?business_i
 APP_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "NISIT", "billcheck")
 PROFILE = os.environ.get("BILLCHECK_PROFILE") or os.path.join(APP_DIR, "fb-profile")
 RUNS_DIR = os.path.join(APP_DIR, "runs")
+CONFIG = os.path.join(APP_DIR, "config.json")
+PDF_FOLDER = "บิล Meta"   # default: <Downloads>\บิล Meta\<run time>\*.pdf
 KEEP_RUN_DAYS = 30
 
 TZ = dt.timezone(dt.timedelta(hours=7))
@@ -136,6 +138,36 @@ def set_label(acct, bank):
     if digits[-2:] in ACCT_SET:
         name += f" ชุดที่ {ACCT_SET.index(digits[-2:]) + 1}"
     return f"{name} ({acct})"
+
+
+def downloads_dir():
+    """The user's Downloads folder (it can be moved to another drive, so ask Windows)."""
+    try:
+        import ctypes, uuid
+        from ctypes import wintypes
+        guid = uuid.UUID("374DE290-123F-4565-9164-39C4925E467C")   # FOLDERID_Downloads
+        buf = ctypes.c_wchar_p()
+        if ctypes.windll.shell32.SHGetKnownFolderPath(ctypes.byref(ctypes.c_buffer(guid.bytes_le, 16)), 0, None,
+                                                      ctypes.byref(buf)) == 0:
+            try:
+                return buf.value
+            finally:
+                ctypes.windll.ole32.CoTaskMemFree(buf)
+    except Exception:
+        pass
+    return os.path.join(os.path.expanduser("~"), "Downloads")
+
+
+def pdf_root():
+    """Where bill PDFs go: the folder set in the program, else <Downloads>\บิล Meta."""
+    try:
+        with open(CONFIG, encoding="utf-8") as f:
+            p = json.load(f).get("pdf_dir")
+        if isinstance(p, str) and os.path.isabs(p):
+            return p
+    except Exception:
+        pass
+    return os.path.join(downloads_dir(), PDF_FOLDER)
 
 
 # ── NISIT ────────────────────────────────────────────────────────────────────────────────────
@@ -664,11 +696,22 @@ def build_rows(data, bills, d_judge, today, frozen=None, ghosts=()):
              if s["id"] not in paired and s["acct"] in floor and s["amt"] >= floor[s["acct"]]
              and (today - s["day"]).days >= INV_LATE]
     shaky = {s["id"] for s in queue}
+
+    def reach(u, p):
+        # u can only have been the real payment of one of p's bills when it sits in a window that pays
+        # that bill (bill date INV_LATE after .. BULK_DAYS before the SMS) and is at least as big; before
+        # 16/10 any pair within 10 days either side counted, so one non-Meta outflow early in the month
+        # turned the whole bank account yellow for weeks. A pair whose bills were not downloaded (frozen)
+        # keeps the old day span.
+        brs = paired.get(p["id"], ("", []))[1]
+        if not brs:
+            return abs((p["day"] - u["day"]).days) <= span
+        return any(-INV_LATE <= (u["day"] - b["day"]).days <= BULK_DAYS and u["amt"] >= b["amt"] for b in brs)
+
     while queue:
         u = queue.pop()
         for p in nodes:
-            if (p["id"] not in shaky and p["id"] in paired and p["acct"] == u["acct"]
-                    and abs((p["day"] - u["day"]).days) <= span):
+            if (p["id"] not in shaky and p["id"] in paired and p["acct"] == u["acct"] and reach(u, p)):
                 shaky.add(p["id"])
                 queue.append(p)
     for r in rows:
@@ -904,9 +947,17 @@ def _run(token, rep, today, state, days, only, run_id, pilot):
     first = accounts if only else [a for a in accounts if (a.get("last_charge") or "") >= bill_from.isoformat()
                                    and on_banks(a, banks)]
     prune_runs()
-    out_dir = os.path.join(RUNS_DIR, dt.datetime.now(TZ).strftime("%Y-%m-%d %H%M%S"))
-    pdf_dir = os.path.join(out_dir, "บิล Meta")
-    os.makedirs(pdf_dir, exist_ok=True)
+    stamp = dt.datetime.now(TZ).strftime("%Y-%m-%d %H%M%S")
+    out_dir = os.path.join(RUNS_DIR, stamp)   # problem screenshots stay here (kept 30 days)
+    os.makedirs(out_dir, exist_ok=True)
+    pdf_dir = os.path.join(pdf_root(), stamp)
+    try:
+        os.makedirs(pdf_dir, exist_ok=True)
+    except OSError as e:
+        rep.log(f"สร้างโฟลเดอร์ PDF ที่ตั้งไว้ไม่ได้ ({e}) ใช้ {PDF_FOLDER} ในดาวน์โหลดแทน")
+        pdf_dir = os.path.join(downloads_dir(), PDF_FOLDER, stamp)
+        os.makedirs(pdf_dir, exist_ok=True)
+    rep.log(f"PDF บิลรอบนี้อยู่ที่ {pdf_dir}")
 
     got, second = {}, []
     if not banks and not only:
@@ -981,7 +1032,7 @@ def _run(token, rep, today, state, days, only, run_id, pilot):
         rep.log("ลองบางบัญชี ไม่ได้ส่งผลขึ้นระบบ")
 
     return {"summary": summary, "d_judge": ddmmyyyy(d_judge), "bill_from": ddmmyyyy(bill_from),
-            "today": ddmmyyyy(today), "saved": not pilot, "folder": out_dir,
+            "today": ddmmyyyy(today), "saved": not pilot, "folder": pdf_dir,
             "rows": [{"at": r["at"].strftime("%d/%m/%Y %H:%M"), "acct": r["acct_label"], "amount": r["amount"],
                       "status": r["status"], "note": r["note"], "bills": [bill_out(b) for b in r["bills"]]}
                      for r in rows],

@@ -64,6 +64,8 @@
   function renderHome(){
     show('home');
     $('sw-auto').checked = !!S.autostart;
+    $('pdf-path').textContent = S.pdf_dir || '';
+    $('btn-pdf-reset').hidden = !S.pdf_custom;
     if(changed('hero', [S.done_today, S.last, S.busy_elsewhere, S.last_err, S.net_wait])) $('hero').innerHTML = heroHtml();
     if(changed('runs', S.runs)) $('runs').innerHTML = runsHtml();
   }
@@ -230,6 +232,18 @@
     api('/api/autostart', { on:on }).then(function(r){ e.target.checked = !!r.autostart; })
       .catch(function(){ e.target.checked = !on; alert('ตั้งค่าไม่สำเร็จ'); });
   });
+  function pdfDir(action){
+    return api('/api/pdfdir', { action:action }).then(function(r){
+      S.pdf_dir = r.pdf_dir; S.pdf_custom = r.pdf_custom;
+      $('pdf-path').textContent = r.pdf_dir || ''; $('btn-pdf-reset').hidden = !r.pdf_custom;
+    }).catch(function(){ alert('ตั้งค่าไม่สำเร็จ'); });
+  }
+  $('btn-pdf-pick').addEventListener('click', function(e){
+    var b = e.currentTarget; b.disabled = true;
+    pdfDir('pick').then(function(){ b.disabled = false; });
+  });
+  $('btn-pdf-reset').addEventListener('click', function(){ pdfDir('reset'); });
+  $('btn-pdf-open').addEventListener('click', function(){ api('/api/open', { what:'pdfroot' }); });
   $('btn-stop').addEventListener('click', function(){
     if(confirm('หยุดตรวจรอบนี้? ผลจะยังไม่ขึ้นระบบ')) api('/api/stop', {});
   });
