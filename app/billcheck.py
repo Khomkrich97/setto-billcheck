@@ -220,11 +220,20 @@ def dismiss_push_prompt(page):
         page.wait_for_timeout(800)
 
 
+# Thai fonts keep shifted vowel/tone-mark glyphs in the Private Use Area (U+F700-F71A); Meta's PDFs
+# (Oct 2026) extract ไม้โท as U+F70B, so "ชำระแล้ว" came out as "ชำระแลว" and no bill counted as paid
+THAI_PUA = str.maketrans({
+    0xF700: "ฐ", 0xF701: "ิ", 0xF702: "ี", 0xF703: "ึ", 0xF704: "ื", 0xF705: "่", 0xF706: "้", 0xF707: "๊",
+    0xF708: "๋", 0xF709: "์", 0xF70A: "่", 0xF70B: "้", 0xF70C: "๊", 0xF70D: "๋", 0xF70E: "์", 0xF70F: "ญ",
+    0xF710: "ั", 0xF711: "ํ", 0xF712: "็", 0xF713: "่", 0xF714: "้", 0xF715: "๊", 0xF716: "๋", 0xF717: "์",
+    0xF718: "ุ", 0xF719: "ู", 0xF71A: "ฺ"})
+
+
 def pdf_text(path):
     import fitz
     doc = fitz.open(path)
     try:
-        return "\n".join(p.get_text() for p in doc)
+        return "\n".join(p.get_text() for p in doc).translate(THAI_PUA)
     finally:
         doc.close()
 
@@ -511,6 +520,10 @@ def match(inv, sms):
         for R, S in groups.values():
             if not S:
                 continue
+            # the alignment below is only right on day-ordered lists; bill rows arrive per account and
+            # newest first, so without this most same-amount rows found no partner (16/10)
+            R.sort(key=lambda r: (r["day"], r["txid"]))
+            S.sort(key=lambda s: (s["day"], str(s.get("at", "")), s["id"]))
             n, m = len(R), len(S)
             best = [[(0, 0)] * (m + 1) for _ in range(n + 1)]
             for i in range(1, n + 1):
