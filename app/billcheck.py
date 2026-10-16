@@ -84,6 +84,8 @@ SMS_BACK = 10        # earlier SMS loaded as context so they keep their own bill
 MAX_BACK = 31        # never chase an unpaired SMS further back than this
 KEEP_OPEN = MAX_BACK + BULK_DAYS + INV_LATE + 5   # an unresolved SMS keeps challenging pairs this long
 NONE_STABLE = 15     # seconds "no transactions" must stay on screen before it is believed
+# accounts whose billing pages load at the same time (one tab each); BILLCHECK_PARALLEL=1 = one by one
+PARALLEL = max(1, min(4, int(os.environ.get("BILLCHECK_PARALLEL") or 3)))
 
 
 class Fail(Exception):
@@ -293,38 +295,47 @@ def body_text(page):
         return ""
 
 
-def fetch_one(page, aid, eps, label_re, dest, out_dir):
-    """-> ('ok', path) | ('none', why) | ('login', why) | ('error', why)."""
-    page.goto(BILLING_URL.format(aid=aid, s=eps[0], e=eps[1]), wait_until="domcontentloaded")
+def open_bill(page, aid, eps):
+    """Start loading one account's billing page; the caller polls probe_bill() (pages load side by side)."""
+    page.goto(BILLING_URL.format(aid=aid, s=eps[0], e=eps[1]), wait_until="commit")
+    return {"end": time.time() + 45, "none_since": None}
+
+
+def probe_bill(page, job, label_re):
+    """One look at a loading billing page -> None (keep waiting) | 'btn' | 'none' | 'login' | 'timeout'."""
+    if LOGIN_URL.search(page.url):
+        return "login"
+    body = body_text(page)
     btn = page.locator('[role="button"][aria-haspopup="menu"]', has_text=DOWNLOAD_BTN)
-    end = time.time() + 45
-    none_since = None
-    state = None
-    while time.time() < end:
-        if LOGIN_URL.search(page.url):
-            return "login", "Facebook หลุดล็อกอิน"
-        body = body_text(page)
-        if btn.count() and label_re.search(body):
-            state = "btn"
-            break
-        # The table says "no transactions" while it is still loading (an account with 2.0M spend,
-        # 02/10/2026): believe it only after it stayed on screen NONE_STABLE seconds with no button.
-        if NO_TX.search(body) and label_re.search(body):
-            none_since = none_since or time.time()
-            if time.time() - none_since >= NONE_STABLE:
-                state = "none"
-                break
-        else:
-            none_since = None
-        page.wait_for_timeout(1000)
+    if btn.count() and label_re.search(body):
+        return "btn"
+    # The table says "no transactions" while it is still loading (an account with 2.0M spend,
+    # 02/10/2026): believe it only after it stayed on screen NONE_STABLE seconds with no button.
+    if NO_TX.search(body) and label_re.search(body):
+        job["none_since"] = job["none_since"] or time.time()
+        if time.time() - job["none_since"] >= NONE_STABLE:
+            return "none"
+    else:
+        job["none_since"] = None
+    return "timeout" if time.time() > job["end"] else None
+
+
+def settle_bill(page, aid, state, label_re, out_dir):
+    """A page that will not give a PDF -> ('none', why) | ('login', why) | ('error', why)."""
+    if state == "login":
+        return "login", "Facebook หลุดล็อกอิน"
     if state == "none":
         return "none", "ไม่มีธุรกรรมในช่วงนี้"
-    if state is None:
-        body = body_text(page)
-        why = ("หน้าไม่ขึ้นช่วงวันที่ที่ขอ (อาจไม่มีสิทธิ์ดูบัญชีนี้)" if not label_re.search(body)
-               else "หาปุ่มดาวน์โหลดไม่เจอ (Meta อาจเปลี่ยนหน้า)")
-        return "error", f"{why} ภาพ {snap(page, out_dir, aid, 'nobutton')}"
+    body = body_text(page)
+    why = ("หน้าไม่ขึ้นช่วงวันที่ที่ขอ (อาจไม่มีสิทธิ์ดูบัญชีนี้)" if not label_re.search(body)
+           else "หาปุ่มดาวน์โหลดไม่เจอ (Meta อาจเปลี่ยนหน้า)")
+    return "error", f"{why} ภาพ {snap(page, out_dir, aid, 'nobutton')}"
 
+
+def start_download(page, aid, job, out_dir):
+    """Ask Meta for the report PDF and return at once: the file arrives later on this tab's download event
+    (Meta takes 5-15 s to build it, so the other tabs keep going). -> None, or ('error', why)."""
+    btn = page.locator('[role="button"][aria-haspopup="menu"]', has_text=DOWNLOAD_BTN)
     dismiss_push_prompt(page)
     btn.first.click()
     item = page.get_by_text(PDF_ITEM)
@@ -332,13 +343,23 @@ def fetch_one(page, aid, eps, label_re, dest, out_dir):
         item.first.wait_for(state="visible", timeout=10000)
     except Exception:
         return "error", f"กดดาวน์โหลดแล้วไม่มีเมนู PDF ภาพ {snap(page, out_dir, aid, 'nomenu')}"
+    job["dl"], job["dl_end"] = None, time.time() + 90
+    page.once("download", lambda d: job.__setitem__("dl", d))
+    item.first.click()
+    return None
+
+
+def save_download(page, aid, job, dest, out_dir):
+    """-> None (file not here yet) | ('ok', path) | ('error', why)."""
+    if job["dl"] is None:
+        if time.time() < job["dl_end"]:
+            return None
+        return "error", f"รอไฟล์ไม่มา (Timeout) ภาพ {snap(page, out_dir, aid, 'nodownload')}"
     try:
-        with page.expect_download(timeout=90000) as dl:
-            item.first.click()
-        dl.value.save_as(dest)
+        job["dl"].save_as(dest)
     except Exception as e:
         return "error", f"รอไฟล์ไม่มา ({type(e).__name__}) ภาพ {snap(page, out_dir, aid, 'nodownload')}"
-    # every Meta download has the same file name; a late file can land under the wrong account
+    # every Meta download has the same file name; never trust which tab a file came from without reading it
     got, _ = parse_pdf(dest)
     if got != aid:
         return "error", f"PDF ที่ได้เป็นของบัญชี {got or 'ไม่ทราบ'} ไม่ใช่ {aid}"
@@ -352,6 +373,7 @@ class MetaBrowser:
     def __init__(self, rep, out_dir):
         self.rep, self.out_dir = rep, out_dir
         self.pw = self.ctx = self.page = None
+        self.extra = []   # side-by-side tabs besides self.page
 
     def __enter__(self):
         from playwright.sync_api import sync_playwright
@@ -466,33 +488,110 @@ class MetaBrowser:
             self.rep.fb_login(False)
         raise Fail(f"ยังไม่ได้ล็อกอิน Facebook ภายใน {timeout_min} นาที กดตรวจอีกครั้งแล้วล็อกอินในหน้าต่างที่เด้งขึ้นมา")
 
+    def _tab(self, k):
+        """Tab k of the side-by-side pool (tab 0 is the main page that login uses)."""
+        if k == 0:
+            return self.page
+        while len(self.extra) < k:
+            self.extra.append(None)
+        t = self.extra[k - 1]
+        if t is None or t.is_closed():
+            t = self.extra[k - 1] = self.ctx.new_page()
+        return t
+
+    def _new_tab(self, k):
+        """Replace a crashed or hung tab."""
+        if k == 0:
+            return self.fresh_page()
+        try:
+            if self.extra[k - 1] and not self.extra[k - 1].is_closed():
+                self.extra[k - 1].close()
+        except Exception:
+            pass
+        self.extra[k - 1] = None
+
     def fetch(self, accounts, d_from, d_to, pdf_dir, done0=0, total=None):
+        """PARALLEL accounts at a time, one tab each: their billing pages load and their PDFs are built side
+        by side. A tab is reused only after its file is saved and checked."""
         eps, label_re = epochs(d_from, d_to), range_label_re(d_from, d_to)
         total = total or len(accounts)
-        result = {}
-        for n, a in enumerate(accounts, 1):
-            self.rep.check_stop()
-            self.rep.account(a["id"], a["name"], "loading")
-            dest = os.path.join(pdf_dir, f"{safe_name(a['name'])} {a['id']}.pdf")   # names can repeat
-            st, info = "error", "ไม่ได้ลอง"
-            for attempt in range(2):
-                try:
-                    st, info = fetch_one(self.page, a["id"], eps, label_re, dest, self.out_dir)
-                except Exception as e:
-                    st, info = "error", f"{type(e).__name__}: {str(e).splitlines()[0][:150]}"
-                    try:
-                        self.fresh_page()   # tab crashed or hung: one retry on a new tab
-                    except Exception:
-                        raise Fail("หน้าต่าง Facebook ถูกปิดระหว่างโหลดบิล กดตรวจอีกครั้ง แล้วอย่าปิดหน้าต่างนั้น"
-                                   "จนโปรแกรมทำเสร็จ")
-                    continue
-                if st == "login":
-                    self.ensure_login()
-                    continue
-                break
+        result, todo, slots, done = {}, [(a, 0) for a in accounts], {}, 0
+
+        def close(a, st, info):
+            nonlocal done
+            done += 1
             result[a["id"]] = (st, info)
             self.rep.account(a["id"], a["name"], st, "" if st in ("ok", "none") else info)
-            self.rep.progress(done0 + n, total, a["name"])
+            self.rep.progress(done0 + done, total, a["name"])
+
+        def broke(k, a, tries, e):
+            info = f"{type(e).__name__}: {str(e).splitlines()[0][:150]}"
+            try:
+                self._new_tab(k)   # tab crashed or hung: one retry on a new tab
+            except Exception:
+                raise Fail("หน้าต่าง Facebook ถูกปิดระหว่างโหลดบิล กดตรวจอีกครั้ง แล้วอย่าปิดหน้าต่างนั้น"
+                           "จนโปรแกรมทำเสร็จ")
+            if tries < 1:
+                todo.insert(0, (a, tries + 1))
+            else:
+                close(a, "error", info)
+
+        def fill():
+            for k in range(PARALLEL):
+                if k in slots or not todo:
+                    continue
+                a, tries = todo.pop(0)
+                self.rep.account(a["id"], a["name"], "loading")
+                try:
+                    slots[k] = (a, tries, open_bill(self._tab(k), a["id"], eps))
+                except Exception as e:
+                    broke(k, a, tries, e)
+
+        while todo or slots:
+            self.rep.check_stop()
+            fill()
+            relogin = False
+            for k in sorted(slots):
+                a, tries, job = slots[k]
+                page = self._tab(k)
+                dest = os.path.join(pdf_dir, f"{safe_name(a['name'])} {a['id']}.pdf")   # names can repeat
+                try:
+                    if "dl" in job:
+                        r = save_download(page, a["id"], job, dest, self.out_dir)
+                    else:
+                        state = probe_bill(page, job, label_re)
+                        if not state:
+                            continue
+                        if state == "login":
+                            del slots[k]
+                            if tries < 1:
+                                relogin = True
+                                todo.insert(0, (a, tries + 1))
+                            else:
+                                close(a, "login", "Facebook หลุดล็อกอิน")
+                            continue
+                        r = (start_download(page, a["id"], job, self.out_dir) if state == "btn"
+                             else settle_bill(page, a["id"], state, label_re, self.out_dir))
+                except Exception as e:
+                    slots.pop(k, None)
+                    broke(k, a, tries, e)
+                    fill()
+                    continue
+                if r:
+                    del slots[k]
+                    close(a, *r)
+                    fill()   # the next account starts loading while the others still wait
+            if relogin:
+                # every tab shares the login: put the pages in flight back in the queue and sign in once
+                for k in sorted(slots, reverse=True):
+                    todo.insert(0, slots.pop(k)[:2])
+                self.ensure_login()
+                continue
+            if slots:
+                try:
+                    self.page.wait_for_timeout(500)   # also lets download events arrive
+                except Exception:
+                    time.sleep(0.5)
         return result
 
 
