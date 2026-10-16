@@ -45,6 +45,8 @@ if not exist "%~dp0app\app.py" goto nofiles
 robocopy "%~dp0app" "%APPD%" /E /PURGE /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 goto fail
 if not exist "%VPYW%" set "VPYW=%VPY%"
+rem app.py puts a shortcut with the program's icon next to this file (and once on the desktop)
+set "BILLCHECK_FROM=%~dp0"
 start "" "%VPYW%" "%APPD%\app.py"
 exit /b 0
 

@@ -162,6 +162,45 @@ def autostart_set(on):
                 pass
 
 
+# ── shortcuts with the program's icon (a .bat cannot carry one) ───────────────────────────────
+SHORTCUT_NAME = "เช็คเงินตัดแอด.lnk"
+
+
+def ensure_shortcuts():
+    """Desktop shortcut once (deleting it is respected), plus one next to START.bat whenever it is missing.
+    Both start this installed copy directly, so they keep working if the unzipped folder is moved."""
+    try:
+        pyw = os.path.join(os.path.dirname(sys.executable), "pythonw.exe")
+        if not os.path.exists(pyw):
+            pyw = sys.executable
+        q = lambda s: "'" + s.replace("'", "''") + "'"   # PowerShell single-quoted literal
+        cfg = load_json(CONFIG, {})
+        dirs = []
+        src = os.environ.get("BILLCHECK_FROM", "").rstrip("\\/")
+        if src and os.path.isdir(src) and not os.path.exists(os.path.join(src, SHORTCUT_NAME)):
+            dirs.append(q(src))
+        if not cfg.get("desktop_shortcut"):
+            dirs.append("[Environment]::GetFolderPath('Desktop')")
+        if not dirs:
+            return
+        ps = "$w = New-Object -ComObject WScript.Shell\n" + "".join(
+            f"$l = $w.CreateShortcut((Join-Path ({d}) {q(SHORTCUT_NAME)}))\n"
+            f"$l.TargetPath = {q(pyw)}; $l.Arguments = {q(chr(34) + os.path.abspath(__file__) + chr(34))}\n"
+            f"$l.WorkingDirectory = {q(HERE)}; $l.IconLocation = {q(os.path.join(HERE, 'icon.ico') + ',0')}\n"
+            f"$l.Description = {q('เช็คเงินตัดแอด Meta')}; $l.Save()\n" for d in dirs)
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand",
+                            base64.b64encode(ps.encode("utf-16-le")).decode("ascii")],
+                           capture_output=True, text=True, timeout=60,
+                           creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        if r.returncode != 0:
+            log_file(f"shortcut failed: {(r.stderr or '')[-300:]}")
+            return
+        if not cfg.get("desktop_shortcut"):
+            save_json(CONFIG, {**load_json(CONFIG, {}), "desktop_shortcut": True})
+    except Exception as e:
+        log_file(f"shortcut failed: {e}")
+
+
 # ── run state shared with the web UI ───────────────────────────────────────────────────────────
 class State:
     def __init__(self):
@@ -354,7 +393,8 @@ def do_login(email, password):
 # ── HTTP ───────────────────────────────────────────────────────────────────────────────────────
 STATIC = {"/": ("index.html", "text/html; charset=utf-8"),
           "/app.css": ("app.css", "text/css; charset=utf-8"),
-          "/app.js": ("app.js", "application/javascript; charset=utf-8")}
+          "/app.js": ("app.js", "application/javascript; charset=utf-8"),
+          "/icon.png": ("icon.png", "image/png")}
 CSP = ("default-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; "
        "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 
@@ -661,6 +701,7 @@ def main():
             pass
     threading.Thread(target=watchdog, args=(httpd, time.time()), daemon=True).start()
     threading.Thread(target=autostart_flow if auto else refresh_last, daemon=True).start()
+    threading.Thread(target=ensure_shortcuts, daemon=True).start()
     open_window(f"http://127.0.0.1:{port}/?k={key}")
     try:
         httpd.serve_forever()

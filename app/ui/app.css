@@ -36,7 +36,7 @@ body{background:var(--bg);color:var(--text);font:14.5px/1.55 var(--sans);-webkit
 .bar{background:linear-gradient(180deg,var(--navy-2),var(--navy));color:var(--on-navy);box-shadow:var(--shadow)}
 .bar-in{max-width:1080px;margin:0 auto;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px}
 .brand{display:flex;align-items:center;gap:12px}
-.mark{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:rgba(255,255,255,.08);color:#7dd3fc;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+.mark{width:40px;height:40px;display:block}
 .eyebrow{font-size:11px;letter-spacing:.12em;color:var(--on-navy-2);font-weight:600}
 .eyebrow span{opacity:.5;margin:0 4px}
 .title{font-size:19px;font-weight:700;letter-spacing:.01em}
