@@ -18,6 +18,7 @@
 ไอคอน `app/icon.ico` + `app/ui/icon.png` วาดจาก `tools/make_icon.py`
 
 ปล่อยเวอร์ชันใหม่: แก้โค้ด เปลี่ยนเลขใน `app/VERSION` แล้ว push ขึ้น `main`
+ถ้ารุ่นใหม่แก้ผลตรวจที่ผิด ให้ขึ้นรุ่นขั้นต่ำ `c_min` ใน NISIT RPC `billcheck_begin` ด้วย เครื่องที่ยังเป็นรุ่นเก่ากว่านั้นจะเริ่มตรวจไม่ได้ และขึ้นข้อความบอกให้ปิดแล้วเปิดใหม่ (ตอนนี้ขั้นต่ำ 2.11 · migration `NISIT/supabase/migrations/20261021a_billcheck_min_version.sql` · เลขรุ่นที่รันเก็บไว้ใน `billcheck_run.version`)
 เปลี่ยน library ให้แก้บรรทัด `DEPS` ใน `START.bat` เครื่องของทีมจะติดตั้งให้เองก่อนเปลี่ยนเวอร์ชัน
 โฟลเดอร์ที่เป็น git clone ไม่อัปเดตตัวเอง (`START.bat` ตั้ง `BILLCHECK_NO_UPDATE`) ใช้ทดสอบก่อน push
 

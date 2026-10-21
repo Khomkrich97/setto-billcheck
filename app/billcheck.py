@@ -45,6 +45,15 @@ CONFIG = os.path.join(APP_DIR, "config.json")
 PDF_FOLDER = "บิล Meta"   # default: <Downloads>\บิล Meta\<run time>\*.pdf
 KEEP_RUN_DAYS = 30
 
+
+def app_version():
+    """app/VERSION; billcheck_begin refuses copies older than the last fix that changes results."""
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "VERSION"), encoding="utf-8") as f:
+            return f.read().strip()[:20]
+    except OSError:
+        return ""
+
 TZ = dt.timezone(dt.timedelta(hours=7))
 THAI_MONTH = ["ม.ค.", "ก.พ.", "มี.ค.", "เม.ย.", "พ.ค.", "มิ.ย.",
               "ก.ค.", "ส.ค.", "ก.ย.", "ต.ค.", "พ.ย.", "ธ.ค."]
@@ -881,7 +890,28 @@ def collect(got, name_of):
             nones.append(name_of[aid])
         else:
             fails.append((name_of[aid], info))
+    check_statuses(bills)
     return bills, fails, nones
+
+
+# 21/10/2026: a copy without the THAI_PUA fix read every status as "ชำระแลว" (U+F70B left in), counted no
+# bill as paid and sent 10 false "no bill" SMS. A status we cannot read must stop the run, not become red.
+PUA_RE = re.compile("[-]")
+UNREAD_MIN_ROWS = 5   # this many card rows with not one paid = the statuses were not read
+
+
+def check_statuses(bills):
+    odd = [b for b in bills if PUA_RE.search(b["status"])]
+    card = [b for b in bills if b["card"].isdigit()]
+    if not odd and (len(card) < UNREAD_MIN_ROWS or any(PAID_RE.match(b["status"]) for b in card)):
+        return
+    b = (odd or card)[0]
+    codes = " ".join(f"U+{ord(c):04X}" for c in b["status"] if ord(c) > 0x7F and not 0x0E00 <= ord(c) <= 0x0E7F)
+    why = (f"มีอักษรพิเศษค้าง {len(odd)} แถว" if odd
+           else f"บิลตัดบัตร {len(card)} แถว ไม่มีแถวไหนอ่านได้ว่า ชำระแล้ว")
+    raise Fail(f"อ่านสถานะบิล Meta ไม่ออก ({why}) ยังไม่ได้ส่งผลขึ้นระบบ "
+               f"ตัวอย่าง {b['ad_name']} {ddmmyyyy(b['day'])} สถานะ \"{b['status']}\"{f' [{codes}]' if codes else ''} "
+               f"โปรแกรมรุ่น {app_version() or '?'} ส่งภาพนี้ให้คนดูแลโปรแกรม")
 
 
 def raise_caps(token, run_id, bills, name_of, rep):
@@ -987,10 +1017,12 @@ def run_check(token, rep=None, days=None, only=None, host=None, write=True):
     host = (host or os.environ.get("COMPUTERNAME") or socket.gethostname() or "")[:60]
 
     rep.step("nisit", "เชื่อมระบบ NISIT")
-    begin = rpc("billcheck_begin", {"p_token": token, "p_host": host})
+    begin = rpc("billcheck_begin", {"p_token": token, "p_host": host, "p_version": app_version()})
     if not begin.get("ok"):
         if begin.get("error") == "unauthorized":
             raise AuthFail(AUTH_MSG)
+        if begin.get("code") == "old_version":
+            raise Fail(begin["error"])
         if begin.get("error") == "busy":
             raise Fail(f"มีคนกำลังตรวจอยู่ ({begin.get('by')} เครื่อง {begin.get('host') or 'ไม่ทราบชื่อ'} "
                        f"เริ่ม {begin.get('since')}) รอให้เครื่องนั้นเสร็จก่อน แล้วดูผลในหน้าเติมงบแอด")
